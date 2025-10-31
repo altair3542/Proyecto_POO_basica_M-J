@@ -1,23 +1,21 @@
 from __future__ import annotations
-from pathlib import Path
+from typing import Iterable, List, Literal
 import csv
-from typing import Iterable, Dict, List
+from models.cliente import Cliente
+from models.vehiculo import Vehiculo
 
-def _read_csv(path: Path) -> List[Dict[str, str]]:
-    if not path.exists():
-        return []
-    with path.open("r", encoding="utf-8", newline="") as f:
-        reader = csv.DictReader(f)
-        return [dict(row) for row in reader]
+OnError = Literal["raise", "skip"]
 
-def read_clientes(data_dir: Path) -> List[Dict[str, str]]:
-    """Lee clientes desde CSV (dicts)."""
-    return _read_csv(data_dir / "clientes.csv")
+def _require_headers(found: Iterable[str], required:Iterable[str]) -> None:
+    missing = [h for h in required if h not in found]
+    if missing:
+        raise ValueError(f"CSV invalido, faltan columnas: {'join(missing)'}")
 
-def read_vehiculos(data_dir: Path) -> List[Dict[str, str]]:
-    """Lee vehículos desde CSV (dicts)."""
-    return _read_csv(data_dir / "vehiculos.csv")
+def _to_int(text:str, field: str) -> int:
+    try:
+        return int(text)
+    except Exception as ex:
+        raise ValueError(f"valor no entero en '{field}':(text!r)")
+from ex
 
-def read_servicios(data_dir: Path) -> List[Dict[str, str]]:
-    """Lee servicios desde CSV (dicts)."""
-    return _read_csv(data_dir / "servicios.csv")
+
