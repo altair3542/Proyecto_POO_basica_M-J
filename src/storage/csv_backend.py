@@ -1,7 +1,7 @@
 # src/storage/csv_backend.py
 from __future__ import annotations
 from typing import Iterable, List, Literal
-import csv
+import os, csv, tempfile
 from models.cliente import Cliente
 from models.vehiculo import Vehiculo
 
@@ -18,54 +18,63 @@ def _to_int(text: str, field: str) -> int:
     except Exception as ex:
         raise ValueError(f"Valor no entero en '{field}': {text!r}") from ex
 
-def read_clientes(path: str, on_error: OnError = "raise") -> List[Cliente]:
-    """
-    Lee clientes desde CSV con encabezados: id,nombre,email,telefono
-    Retorna lista de Cliente. on_error: 'raise' (default) o 'skip'.
-    """
-    out: List[Cliente] = []
-    skipped = 0
-    with open(path, mode="r", encoding="utf-8", newline="") as fh:
-        reader = csv.DictReader(fh)
-        _require_headers(reader.fieldnames or [], ["id", "nombre", "email", "telefono"])
-        for i, row in enumerate(reader, start=2):  # fila 2 = primera de datos
-            try:
-                id_ = _to_int((row["id"] or "").strip(), "id")
-                nombre = (row["nombre"] or "")
-                email = (row["email"] or "")
-                telefono = (row["telefono"] or None)
-                out.append(Cliente(id_, nombre, email, telefono))
-            except Exception as ex:
-                if on_error == "skip":
-                    skipped += 1
-                    continue
-                raise ValueError(f"Fila {i}: {ex}") from ex
-    if skipped:
-        # podrías registrar/retornar este info al caller si lo necesitas
-        pass
-    return out
+def _atomic_write(path: str, text: str) -> None:
+    #escribir en un tmp y vamos a renombrar el archivo generado
+    d = os.path.dirname(path) or "."
+    os.makedirs(d, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=d, prefix=".tmp_",suffix=".csv")
+    with os.fdopen(fd, "w", encoding="utf-8", newline="") as fh:
+        fh.write(text)
+    os.replace(tmp, path)
 
-def read_vehiculos(path: str, on_error: OnError = "raise") -> List[Vehiculo]:
-    """
-    Lee vehículos desde CSV con encabezados: id,cliente_id,placa,marca,modelo
-    Retorna lista de Vehiculo.
-    """
-    out: List[Vehiculo] = []
-    skipped = 0
-    with open(path, mode="r", encoding="utf-8", newline="") as fh:
-        reader = csv.DictReader(fh)
-        _require_headers(reader.fieldnames or [], ["id", "cliente_id", "placa", "marca", "modelo"])
-        for i, row in enumerate(reader, start=2):
-            try:
+class CsvStorage:
+    def __init__(self, base_dir: str = "data"):
+        self.base = base_dir
+        os.makedirs(self.base, exist_ok=True)
+
+    # ---------- Lectura ----------
+    def load_clientes(self) -> List[Cliente]:
+        path = os.path.join(self.base, "clientes.csv")
+        out: List[Cliente] = []
+        with open(path, "r", encoding="utf-8", newline="") as fh:
+            reader = csv.DictReader(fh)
+            _require_headers(reader.fieldnames, ["id","nombre","email","telefono"])
+            for i, row in enumerate(reader, start=2):
+                id_ = _to_int((row["id"] or "").strip(), "id")
+                out.append(Cliente(id_, row["nombre"] or "", row["email"] or "", row.get("telefono") or None))
+        return out
+
+    def load_vehiculos(self) -> List[Vehiculo]:
+        path = os.path.join(self.base, "vehiculos.csv")
+        out: List[Vehiculo] = []
+        with open(path, "r", encoding="utf-8", newline="") as fh:
+            reader = csv.DictReader(fh)
+            _require_headers(reader.fieldnames, ["id","cliente_id","placa","marca","modelo"])
+            for i, row in enumerate(reader, start=2):
                 id_ = _to_int((row["id"] or "").strip(), "id")
                 cliente_id = _to_int((row["cliente_id"] or "").strip(), "cliente_id")
-                placa = (row["placa"] or "")
-                marca = (row["marca"] or "")
-                modelo = (row["modelo"] or "")
-                out.append(Vehiculo(id_, cliente_id, placa, marca, modelo))
-            except Exception as ex:
-                if on_error == "skip":
-                    skipped += 1
-                    continue
-                raise ValueError(f"Fila {i}: {ex}") from ex
-    return out
+                out.append(Vehiculo(id_, cliente_id, row["placa"] or "", row["marca"] or "", row["modelo"] or ""))
+        return out
+
+    # ---------- Escritura ----------
+    def save_clientes(self, clientes: List[Cliente]) -> None:
+        headers = ["id","nombre","email","telefono"]
+        # Construimos el CSV en memoria para escritura atómica
+        from io import StringIO
+        buf = StringIO()
+        w = csv.DictWriter(buf, fieldnames=headers, lineterminator="\n")
+        w.writeheader()
+        for c in clientes:
+            w.writerow({"id": c.id, "nombre": c.nombre, "email": c.email, "telefono": c.telefono or ""})
+        _atomic_write(os.path.join(self.base, "clientes.csv"), buf.getvalue())
+
+    def save_vehiculos(self, vehiculos: List[Vehiculo]) -> None:
+        headers = ["id","cliente_id","placa","marca","modelo"]
+        from io import StringIO
+        buf = StringIO()
+        w = csv.DictWriter(buf, fieldnames=headers, lineterminator="\n")
+        w.writeheader()
+        for v in vehiculos:
+            w.writerow({"id": v.id, "cliente_id": v.cliente_id, "placa": v.placa,
+                        "marca": v.marca, "modelo": v.modelo})
+        _atomic_write(os.path.join(self.base, "vehiculos.csv"), buf.getvalue())

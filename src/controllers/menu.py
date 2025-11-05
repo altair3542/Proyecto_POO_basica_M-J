@@ -1,63 +1,82 @@
-# src/controllers/menu.py
-from __future__ import annotations
-from typing import Callable, Dict
-from views.console import format_title, format_error, format_success, format_table, emit
+# src/controllers/menu.py  (añade guardar/recargar si hay storage)
+from typing import Callable, Optional
+from views.console import title, ok, err, table, emit
 from controllers.clientes import add_cliente, list_clientes
 from controllers.vehiculos import add_vehiculo, list_vehiculos
+from storage.repository import Storage  # el Protocol
 
-InputFn = Callable[[str], str]
-DBType = Dict[str, list]
+Input = Callable[[str], str]
 
-MENU = """
+def _menu_text(with_storage: bool) -> str:
+    base = """
 [1] Listar clientes
 [2] Crear cliente
 [3] Listar vehículos
-[4] Crear vehículo
-[0] Salir
-"""
+[4] Crear vehículo"""
+    if with_storage:
+        base += """
+[7] Guardar datos en backend
+[9] Recargar desde backend"""
+    base += """
+[0] Salir"""
+    return base
 
-def run(db: DBType, input_func: InputFn = input, printer=print) -> None:
-    emit(format_title("Gestor de Órdenes — Menú (S3)"), printer)
+def run(db: dict, input_func: Input = input, printer=print, storage: Optional[Storage] = None) -> None:
+    emit(title("Gestor — Menú (S5)"), printer)
+    with_storage = storage is not None
+    MENU = _menu_text(with_storage)
+
     while True:
         emit(MENU.strip(), printer)
-        opcion = input_func("Opción: ").strip()
-        if opcion == "0":
-            emit("Hasta luego.", printer)
-            break
+        op = input_func("Opción: ").strip()
+        if op == "0":
+            emit("Hasta luego.", printer); break
         try:
-            handle_option(opcion, db, input_func, printer)
+            handle(op, db, input_func, printer, storage)
         except Exception as ex:
-            emit(format_error(str(ex)), printer)
+            emit(err(str(ex)), printer)
 
-def handle_option(opcion: str, db: DBType, input_func: InputFn, printer=print) -> None:
-    if opcion == "1":
+def handle(op: str, db: dict, input_func: Input, printer=print, storage: Optional[Storage] = None) -> None:
+    if op == "1":
         clientes = list_clientes(db)
-        headers = ["id", "nombre", "email", "telefono"]
-        rows = [(c.id, c.nombre, c.email, c.telefono or "") for c in clientes]
-        emit(format_table(headers, rows), printer)
+        headers = ["id","nombre","email","tel"]
+        rows = [[c.id,c.nombre,c.email,c.telefono or ""] for c in clientes]
+        emit(table(headers, rows), printer)
 
-    elif opcion == "2":
-        id_ = int(input_func("id: "))
-        nombre = input_func("nombre: ")
-        email = input_func("email: ")
-        telefono = input_func("telefono (opcional): ").strip() or None
-        cli = add_cliente(db, id_, nombre, email, telefono)
-        emit(format_success(f"Cliente creado: {cli}"), printer)
+    elif op == "2":
+        c = add_cliente(db,
+            int(input_func("id: ")),
+            input_func("nombre: "),
+            input_func("email: "),
+            (lambda t: t if (t:=input_func("tel (opcional): ").strip()) else None)()
+        )
+        emit(ok(f"Cliente creado: {c}"), printer)
 
-    elif opcion == "3":
+    elif op == "3":
         vehiculos = list_vehiculos(db)
-        headers = ["id", "cliente_id", "placa", "marca", "modelo"]
-        rows = [(v.id, v.cliente_id, v.placa, v.marca, v.modelo) for v in vehiculos]
-        emit(format_table(headers, rows), printer)
+        headers = ["id","cliente_id","placa","marca","modelo"]
+        rows = [[v.id,v.cliente_id,v.placa,v.marca,v.modelo] for v in vehiculos]
+        emit(table(headers, rows), printer)
 
-    elif opcion == "4":
-        id_ = int(input_func("id: "))
-        cliente_id = int(input_func("cliente_id: "))
-        placa = input_func("placa: ")
-        marca = input_func("marca: ")
-        modelo = input_func("modelo: ")
-        veh = add_vehiculo(db, id_, cliente_id, placa, marca, modelo)
-        emit(format_success(f"Vehículo creado: {veh}"), printer)
+    elif op == "4":
+        v = add_vehiculo(db,
+            int(input_func("id: ")),
+            int(input_func("cliente_id: ")),
+            input_func("placa: "),
+            input_func("marca: "),
+            input_func("modelo: "),
+        )
+        emit(ok(f"Vehículo creado: {v}"), printer)
+
+    elif op == "7" and storage:
+        storage.save_clientes(db.get("clientes", []))
+        storage.save_vehiculos(db.get("vehiculos", []))
+        emit(ok("Datos guardados en backend."), printer)
+
+    elif op == "9" and storage:
+        db["clientes"] = storage.load_clientes()
+        db["vehiculos"] = storage.load_vehiculos()
+        emit(ok("Datos recargados desde backend."), printer)
 
     else:
-        emit(format_error("Opción inválida"), printer)
+        emit(err("Opción inválida"), printer)
